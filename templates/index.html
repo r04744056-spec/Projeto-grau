@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>PROJETO GRAU - CIDADE 2.5D</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:Arial,sans-serif;-webkit-tap-highlight-color:transparent}
+body{background:#87ceeb;overflow:hidden}
+#hud{position:fixed;top:0;left:0;right:0;z-index:20;background:rgba(0,0,0,.85);padding:8px 10px;border-bottom:3px solid #ff6d00;color:#fff}
+#h1{display:flex;justify-content:space-between;font-weight:900;font-size:15px}
+#h2{display:flex;justify-content:space-between;font-size:11px;color:#ccc;margin-top:3px}
+#dinheiro{color:#00e676}
+#game{position:fixed;top:0;left:0;width:100vw;height:100vh;display:block}
+#controles{position:fixed;bottom:0;left:0;right:0;z-index:20;padding:8px;background:linear-gradient(transparent,rgba(0,0,0,.95));color:#fff}
+#barra{width:90%;height:20px;background:#333;margin:4px auto;border-radius:20px;overflow:hidden;border:2px solid #555;position:relative}
+#zona{position:absolute;left:30%;width:40%;height:100%;background:#00e676}
+#ponteiro{position:absolute;top:0;width:12px;height:100%;background:#fff;left:50%}
+#joy{width:115px;height:115px;background:rgba(255,255,255,.25);border:2px solid #fff;border-radius:50%;position:relative;float:left;margin-left:8px}
+#bola{width:50px;height:50px;background:#ff6d00;border-radius:50%;position:absolute;left:32px;top:32px}
+#botoesDir{float:right;display:grid;grid-template-columns:1fr 1fr;gap:8px;width:205px}
+button{padding:13px 4px;font-size:13px;font-weight:900;border:none;border-radius:12px;background:#222;color:#fff}
+#btnGrau{background:linear-gradient(#ff6d00,#ff3d00);font-size:17px;grid-column:span 2;padding:18px}
+#msg{position:fixed;top:42%;left:0;right:0;text-align:center;font-size:26px;font-weight:900;text-shadow:0 0 10px #000;z-index:30;pointer-events:none;color:#fff}
+#modal{position:fixed;inset:0;background:rgba(0,0,0,.97);display:none;padding:18px;z-index:99;overflow:auto;color:#fff}
+#modal button{display:block;width:100%;margin:8px 0;padding:16px;background:#222;color:#fff}
+</style>
+</head>
+<body>
+<canvas id="game" width="420" height="800"></canvas>
+<div id="hud">
+<div id="h1"><span>💰 R$ <span id="dinheiro">0</span></span><span>⭐ <span id="pontos">0</span></span><span>🔥 x<span id="combo">1</span></span><span>🏍️ CG 160</span></div>
+<div id="h2"><span id="vel">0 KM/H</span><span id="pol">POLÍCIA ☆☆☆☆☆</span></div>
+<div id="h2"><span id="fuga">MAPA LIVRE - ANDA PRA ONDE QUISER</span><span id="serv">Sem serviço</span></div>
+</div>
+<div id="msg">🏍️ CARREGANDO CIDADE...</div>
+<div id="controles">
+<div style="text-align:center;font-size:12px">⚖️ EQUILÍBRIO <span id="eqTxt">50%</span></div>
+<div id="barra"><div id="zona"></div><div id="ponteiro"></div></div>
+<div id="joy"><div id="bola"></div></div>
+<div id="botoesDir">
+<button id="btnGrau">⬆️ SEGURA GRAU</button>
+<button onclick="iniciarFuga()" style="background:#c62828">🚨 FUGA</button>
+<button onclick="esconder()" style="background:#2e7d32">🙈 ESCONDER</button>
+<button onclick="abrirServicos()" style="background:#2962ff">💼 SERVIÇO</button>
+<button onclick="levantar()" style="background:#555">🔄 LEVANTAR</button>
+<button onclick="buzinar()">📢 BUZINA</button>
+</div><div style="clear:both"></div>
+</div>
+<div id="modal"><h2 id="modalTitulo"></h2><div id="modalConteudo"></div><button onclick="fecharModal()" style="background:#ff5252;color:#fff">FECHAR</button></div>
+
+<script>
+let dinheiro=0,pontos=0,combo=1,equilibrio=50,caiu=false,empinando=false,vel=0,angle=-Math.PI/2,px=1000,py=1000,tempoEmpinado=0,fugindo=false,estrelas=0,ultimaEstrela=0,inicioFuga=0,servico=null,tempoServico=0;
+let joyX=0,joyY=0,joyAtivo=false;
+const cv=document.getElementById('game'); const ctx=cv.getContext('2d');
+// Ajusta canvas pro tamanho da tela
+function resize(){ cv.width=window.innerWidth; cv.height=window.innerHeight; } resize(); window.addEventListener('resize',resize);
+
+// Cidade fixa pra não sumir
+let predios=[];
+for(let gx=0;gx<8;gx++) for(let gy=0;gy<8;gy++){ predios.push({x:gx*250+20,y:gy*250+20,w:130,h:130,alt:40+Math.random()*70,cor:['#e74c3c','#3498db','#9b59b6','#e67e22','#1abc9c','#f1c40f'][Math.floor(Math.random()*6)]}); }
+let moedas=[]; for(let i=0;i<25;i++) moedas.push({x:Math.random()*2000,y:Math.random()*2000});
+let carros=[]; for(let i=0;i<8;i++) carros.push({x:Math.random()*2000,y:Math.random()*2000,ang:Math.random()*6});
+let policiais=[]; for(let i=0;i<2;i++) policiais.push({x:1100,y:1100});
+
+function iso(x,y){ return {sx:(x-y)*0.7, sy:(x+y)*0.35}; }
+
+function desenhar(){
+ let W=cv.width, H=cv.height;
+ // céu
+ ctx.fillStyle='#87ceeb'; ctx.fillRect(0,0,W,H);
+ // sol
+ ctx.fillStyle='#ffeb3b'; ctx.beginPath(); ctx.arc(W-60,60,30,0,Math.PI*2); ctx.fill();
+ ctx.fillStyle='#fff'; ctx.font='bold 14px Arial'; ctx.fillText('☁️',80,70); ctx.fillText('☁️',W-150,100);
+ // camera central no jogador
+ let pIso=iso(px,py);
+ let camX=pIso.sx - W/2, camY=pIso.sy - H/2;
+
+ // chão verde
+ ctx.fillStyle='#4CAF50'; ctx.fillRect(0,0,W,H);
+ // ruas em grade - desenha losango
+ ctx.strokeStyle='#333'; ctx.lineWidth=18;
+ for(let i=0;i<=2000;i+=250){
+  let a=iso(i,0), b=iso(i,2000), c=iso(0,i), d=iso(2000,i);
+  ctx.beginPath(); ctx.moveTo(a.sx-camX,a.sy-camY); ctx.lineTo(b.sx-camX,b.sy-camY); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(c.sx-camX,c.sy-camY); ctx.lineTo(d.sx-camX,d.sy-camY); ctx.stroke();
+ }
+ // faixa amarela no meio da rua
+ ctx.strokeStyle='#ffca28'; ctx.lineWidth=2; ctx.setLineDash([10,10]);
+ for(let i=0;i<=2000;i+=250){
+  let a=iso(i,0), b=iso(i,2000);
+  ctx.beginPath(); ctx.moveTo(a.sx-camX,a.sy-camY); ctx.lineTo(b.sx-camX,b.sy-camY); ctx.stroke();
+ }
+ ctx.setLineDash([]);
+
+ // prédios em 3D falso - caixa com topo, lado e frente = parece massinha mas bonito
+ predios.forEach(p=>{
+  let base=iso(p.x,p.y); let bx=base.sx-camX, by=base.sy-camY;
+  let alt=p.alt;
+  // lado esquerdo
+  ctx.fillStyle='#00000033'; ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx-50,by+25); ctx.lineTo(bx-50,by+25-alt); ctx.lineTo(bx,by-alt); ctx.fill();
+  // lado direito
+  ctx.fillStyle=p.cor; ctx.beginPath(); ctx.moveTo(bx,by); ctx.lineTo(bx+50,by+25); ctx.lineTo(bx+50,by+25-alt); ctx.lineTo(bx,by-alt); ctx.fill();
+  // topo
+  ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.moveTo(bx,by-alt); ctx.lineTo(bx-50,by+25-alt); ctx.lineTo(bx,by+50-alt); ctx.lineTo(bx+50,by+25-alt); ctx.fill();
+  // janelas no lado direito
+  ctx.fillStyle='#ffcc00';
+  for(let k=0;k<3;k++) ctx.fillRect(bx+5+k*15, by-alt+15+k*12, 8, 8);
+  ctx.fillStyle='#fff'; ctx.font='bold 11px Arial'; ctx.fillText('🏢',bx-5,by-alt+12);
+ });
+
+ // moedas
+ moedas.forEach(m=>{
+  let s=iso(m.x,m.y); ctx.font='26px Arial'; ctx.fillText('🪙',s.sx-camX-10,s.sy-camY);
+ });
+ // carros
+ carros.forEach(c=>{
+  let s=iso(c.x,c.y); ctx.font='30px Arial'; ctx.fillText('🚗',s.sx-camX-15,s.sy-camY);
+ });
+ // policia
+ if(fugindo) policiais.forEach(p=>{
+  let s=iso(p.x,p.y); ctx.font='34px Arial'; ctx.fillText('🚓',s.sx-camX-15,s.sy-camY);
+ });
+ // jogador - moto GRANDE no centro
+ let cx=W/2, cy=H/2;
+ ctx.save(); ctx.translate(cx,cy);
+ // sombra
+ ctx.fillStyle='rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(0,30,35,10,0,0,Math.PI*2); ctx.fill();
+ if(caiu) ctx.rotate(Math.PI/2);
+ else if(empinando) ctx.rotate(-0.4);
+ ctx.font='70px Arial'; ctx.fillText('🏍️',-35,20);
+ ctx.fillStyle='#fff'; ctx.font='bold 12px Arial'; ctx.fillText('VOCÊ',-18,48);
+ ctx.restore();
+ if(empinando && !caiu){ ctx.font='24px Arial'; ctx.fillText('💨💨',cx-60,cy+40); }
+ // bússola
+ ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(10,70,110,28); ctx.fillStyle='#fff'; ctx.font='bold 12px Arial'; ctx.fillText('📍 PRAÇA NO CENTRO',12,89);
+}
+
+function loop(){
+ if(!caiu){
+  let acel=-joyY;
+  if(acel>0.2) vel=Math.min(12,vel+acel*0.35);
+  else if(acel<-0.2) vel=Math.max(-3,vel+acel*0.2);
+  else vel*=0.98;
+  if(Math.abs(joyX)>0.2 && Math.abs(vel)>0.5) angle+=joyX*0.06;
+  px+=Math.cos(angle)*vel*3; py+=Math.sin(angle)*vel*3;
+  px=Math.max(20,Math.min(1980,px)); py=Math.max(20,Math.min(1980,py));
+  if(empinando){tempoEmpinado+=0.05; pontos+=0.3*combo; if(tempoEmpinado>5)combo=2; if(tempoEmpinado>12)combo=3;} else {tempoEmpinado=0; combo=1;}
+  carros.forEach(c=>{ c.x+=Math.cos(c.ang)*2; c.y+=Math.sin(c.ang)*2; if(Math.random()<0.01) c.ang+=(Math.random()-0.5); if(Math.hypot(c.x-px,c.y-py)<50 && vel>2){caiu=true;document.getElementById('msg').innerText='💥 BATEU!'; setTimeout(()=>document.getElementById('msg').innerText='',2000);} });
+  moedas.forEach(m=>{ if(Math.hypot(m.x-px,m.y-py)<40){m.x=Math.random()*2000; m.y=Math.random()*2000; dinheiro+=20; document.getElementById('msg').innerText='🪙 +R$20!'; setTimeout(()=>document.getElementById('msg').innerText='',800);} });
+  if(fugindo) policiais.forEach(p=>{ let dx=px-p.x, dy=py-p.y; let d=Math.hypot(dx,dy); p.x+=dx/d*2.5; p.y+=dy/d*2.5; if(d<40){caiu=true; fugindo=false; estrelas=0; dinheiro=Math.max(0,dinheiro-100); document.getElementById('msg').innerText='🚓 PEGO! -R$100'; setTimeout(()=>document.getElementById('msg').innerText='',2500);} });
+ }
+ if(!caiu && !empinando) equilibrio-=0.3;
+ equilibrio=Math.max(0,Math.min(100,equilibrio));
+ if(empinando && (equilibrio<=8||equilibrio>=92)){caiu=true; document.getElementById('msg').innerText='💥 CAIU DO GRAU!'; setTimeout(()=>document.getElementById('msg').innerText='',2000);}
+ document.getElementById('dinheiro').innerText=Math.floor(dinheiro);
+ document.getElementById('pontos').innerText=Math.floor(pontos);
+ document.getElementById('combo').innerText=combo;
+ document.getElementById('vel').innerText=Math.floor(Math.abs(vel)*10)+' KM/H';
+ document.getElementById('pol').innerText='POLÍCIA: '+'★'.repeat(estrelas)+'☆'.repeat(5-estrelas);
+ document.getElementById('ponteiro').style.left=equilibrio+'%';
+ document.getElementById('eqTxt').innerText=Math.floor(equilibrio)+'%';
+ if(empinando && !caiu) document.getElementById('msg').innerText='🔥 GRAU! x'+combo;
+ if(fugindo){let t=Math.floor((Date.now()-inicioFuga)/1000); document.getElementById('fuga').innerText='🚨 FUGA '+t+'s - CORRE!'; if(Date.now()-ultimaEstrela>=30000 && estrelas<5){estrelas++; ultimaEstrela=Date.now();}} else document.getElementById('fuga').innerText='MAPA LIVRE';
+ if(servico){tempoServico-=0.05; document.getElementById('serv').innerText=servico.nome+' '+Math.ceil(tempoServico)+'s'; if(tempoServico<=0){dinheiro+=servico.pago; servico=null; document.getElementById('serv').innerText='Pronto!';}}
+ desenhar();
+}
+setInterval(loop,50);
+document.getElementById('msg').innerText='🏍️ USE O JOYSTICK PRA ANDAR!';
+setTimeout(()=>{ if(!caiu && !empinando) document.getElementById('msg').innerText=''; },3000);
+
+// Joystick
+let joy=document.getElementById('joy'), bola=document.getElementById('bola');
+function moverJoy(e){let r=joy.getBoundingClientRect();let cx=(e.touches?e.touches[0].clientX:e.clientX)-r.left-57;let cy=(e.touches?e.touches[0].clientY:e.clientY)-r.top-57;let d=Math.hypot(cx,cy);if(d>45){cx=cx/d*45;cy=cy/d*45;}joyX=cx/45;joyY=cy/45;bola.style.left=(32+cx)+'px';bola.style.top=(32+cy)+'px';}
+joy.addEventListener('touchstart',e=>{joyAtivo=true;moverJoy(e);});joy.addEventListener('touchmove',e=>{if(joyAtivo)moverJoy(e);});joy.addEventListener('touchend',()=>{joyX=0;joyY=0;bola.style.left='32px';bola.style.top='32px';});
+function iniciarFuga(){if(!fugindo){fugindo=true;inicioFuga=Date.now();ultimaEstrela=Date.now();}}
+function esconder(){fugindo=false;estrelas=0;vel=0;}
+function levantar(){caiu=false;equilibrio=50;empinando=false;}
+function buzinar(){document.getElementById('msg').innerText='📢 BIIII! SAI DA FRENTE!';setTimeout(()=>document.getElementById('msg').innerText='',1000);}
+function abrirServicos(){document.getElementById('modalTitulo').innerText='💼 SERVIÇOS';document.getElementById('modalConteudo').innerHTML=`<button onclick="fazerServico('🛵 Entregador',100,10)">🛵 Entregador R$100 - 10s</button><button onclick="fazerServico('🔧 Mecânico',200,14)">🔧 Mecânico R$200 - 14s</button><button onclick="fazerServico('🏍️ Mototáxi',500,22)">🏍️ Mototáxi R$500 - 22s</button>`;document.getElementById('modal').style.display='block';}
+function fazerServico(n,p,t){servico={nome:n,pago:p};tempoServico=t;fecharModal();}
+function fecharModal(){document.getElementById('modal').style.display='none';}
+let btn=document.getElementById('btnGrau');
+btn.addEventListener('touchstart',e=>{e.preventDefault();empinando=true;});
+btn.addEventListener('touchend',()=>empinando=false);
+btn.addEventListener('mousedown',()=>empinando=true);btn.addEventListener('mouseup',()=>empinando=false);
+</script>
+</body>
+</html>
